@@ -1,0 +1,25 @@
+meta:
+  namespace_uri: "http://mock.local/plant/"
+  word_order: high_first        # 32-bit values: high word at lower address
+  byte_order: big               # within each 16-bit word
+  scan_period_ms: 10
+  poll_period_ms: 100
+
+signals:
+  - name: Conveyor1.SpeedSetpoint
+    iec: "%MW10"
+    modbus: {table: holding, addr: 10, type: uint16, scale: 0.001}
+    opcua: {id: "s=Conveyor1.SpeedSetpoint", type: Double, unit: "m/s", access: RW}
+    owner: gateway              # who is allowed to write it
+  - name: Conveyor1.ActualSpeed
+    iec: "%MW20"
+    modbus: {table: input, addr: 20, type: uint16, scale: 0.001}
+    opcua: {id: "s=Conveyor1.ActualSpeed", type: Double, unit: "m/s", access: RO}
+    owner: plc
+
+command_block:                  # written atomically with FC16
+  base: 100
+  layout: [cmd_code, arg0_lo, arg0_hi, seq]
+ack_block:
+  base: 110
+  layout: [ack_seq, ack_result]
