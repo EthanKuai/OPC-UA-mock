@@ -1,10 +1,12 @@
-from .commands import CommandHandshake, CommandTimeout
+from .commands import CommandContended, CommandHandshake, CommandTimeout
 from .poller import ModbusLink, Poller, Reading
-from .server import ACK_STATUS, STALE_STATUS, Gateway, serve
+from .server import ACK_STATUS, CONTENDED_STATUS, STALE_STATUS, Gateway, serve
 
 __all__ = [
     "ACK_STATUS",
+    "CONTENDED_STATUS",
     "STALE_STATUS",
+    "CommandContended",
     "CommandHandshake",
     "CommandTimeout",
     "Gateway",

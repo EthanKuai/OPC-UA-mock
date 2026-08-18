@@ -27,6 +27,11 @@ class CommandTimeout(Exception):
     """The PLC did not acknowledge within ACK_TIMEOUT."""
 
 
+class CommandContended(Exception):
+    """The PLC acknowledged a sequence number this gateway never issued, so
+    another master has been driving it."""
+
+
 def next_seq(current: int) -> int:
     return SEQ_MIN if current >= SEQ_MAX else max(current + 1, SEQ_MIN)
 
@@ -35,14 +40,33 @@ class CommandHandshake:
     def __init__(self, link: ModbusLink, contract: Contract) -> None:
         self.link = link
         self.contract = contract
+        # The last sequence number this gateway put on the wire. The PLC should
+        # be reporting exactly this one back; anything else came from somebody
+        # else's command.
+        self._issued: int | None = None
 
     async def invoke(self, code: CmdCode, arg0: int = 0) -> AckResult:
         cmd, ack = self.contract.command_block, self.contract.ack_block
 
-        # Base the next sequence on what the PLC currently reports rather than
-        # on a counter of our own: after a PLC restart, or after the rogue
-        # master has written the block, ours is the number that is stale.
-        seq = next_seq((await self.link.read_block(ack))["ack_seq"])
+        # The sequence the PLC reports having last executed. If this gateway
+        # is the only master, it is the one we last issued.
+        current = (await self.link.read_block(ack))["ack_seq"]
+
+        if self._issued is not None and current != self._issued:
+            # This is the whole reason the handshake counts rather than
+            # toggling: a toggle bit driven by two masters comes back to where
+            # it started and looks untouched. Resync so a retry can go through,
+            # but refuse this one - whatever state the caller thinks the plant
+            # is in, it was not this gateway that put it there. A PLC restart
+            # reads the same way, and should: we did not see it get here.
+            expected, self._issued = self._issued, current
+            raise CommandContended(
+                f"PLC acknowledged seq={current}, we last issued seq={expected}"
+            )
+
+        # Numbered from the PLC's, not from a counter of our own, so that a
+        # resync after contention or a restart lands somewhere it will accept.
+        seq = next_seq(current)
 
         await self.link.write_block(
             cmd,
@@ -56,6 +80,9 @@ class CommandHandshake:
                 "seq": seq,
             },
         )
+        # Recorded before the ack arrives: a command that timed out is still a
+        # command we issued, and its late ack is ours, not a stranger's.
+        self._issued = seq
 
         deadline = asyncio.get_running_loop().time() + ACK_TIMEOUT
         while asyncio.get_running_loop().time() < deadline:

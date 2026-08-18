@@ -17,7 +17,7 @@ import pytest
 from client import DEADBAND, DeviceController, Update
 from contract import CmdCode, Contract, load_contract
 from gateway import Gateway
-from processes import free_port, spawn
+from processes import free_port, spawn, wait_for_port
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG = REPO_ROOT / "config" / "tags.yaml"
@@ -83,20 +83,6 @@ class GatewayHarness:
         self.task.cancel()
         await asyncio.gather(self.task, return_exceptions=True)
         self.task = None
-
-
-async def wait_for_port(port: int, timeout: float = 10.0) -> None:
-    deadline = asyncio.get_running_loop().time() + timeout
-    while asyncio.get_running_loop().time() < deadline:
-        try:
-            _, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.05)
-            continue
-        writer.close()
-        await writer.wait_closed()
-        return
-    raise AssertionError(f"nothing listening on {port} after {timeout}s")
 
 
 class Collector:

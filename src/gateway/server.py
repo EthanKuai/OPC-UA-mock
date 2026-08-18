@@ -16,7 +16,7 @@ from pymodbus.exceptions import ModbusException
 
 from contract import AckResult, CmdCode, Contract, Signal, encode
 
-from .commands import CommandHandshake, CommandTimeout
+from .commands import CommandContended, CommandHandshake, CommandTimeout
 from .poller import ModbusLink, Poller, Reading
 
 log = logging.getLogger("gateway")
@@ -32,6 +32,11 @@ ACK_STATUS = {
 
 # The poll failed, so every value behind it is unknown. Not stale-but-Good.
 STALE_STATUS = ua.StatusCodes.BadCommunicationError
+
+# Another master has commanded the PLC since we last did. The command was not
+# sent: the caller's picture of the plant is already wrong, and issuing on top
+# of it would only make the next picture wrong too.
+CONTENDED_STATUS = ua.StatusCodes.BadSequenceNumberUnknown
 
 
 class _WriteWatcher:
@@ -176,6 +181,9 @@ class Gateway:
         """
         try:
             result = await self.commands.invoke(code)
+        except CommandContended as exc:
+            log.warning("%s refused: %s", code.name, exc)
+            return ua.StatusCode(CONTENDED_STATUS)
         except CommandTimeout as exc:
             # Never acknowledged: we do not know whether it ran.
             log.warning("%s timed out: %s", code.name, exc)

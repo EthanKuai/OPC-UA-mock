@@ -9,3 +9,6 @@ gateway:
 
 client:
     uv run python -m client
+
+rogue:
+    uv run python -m rogue
