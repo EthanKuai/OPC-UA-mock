@@ -3,3 +3,6 @@ test:
 
 plc:
     uv run python -m plc
+
+gateway:
+    uv run python -m gateway
