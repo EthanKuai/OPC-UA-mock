@@ -8,12 +8,7 @@ the encode/decode boundary is genuine: this side of the socket only ever sees
 from __future__ import annotations
 
 import asyncio
-import os
-import socket
-import subprocess
-import sys
-import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,6 +25,7 @@ from contract import (
     load_contract,
 )
 from plc import MAX_CONNECTIONS
+from processes import free_port, spawn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG = REPO_ROOT / "config" / "tags.yaml"
@@ -41,50 +37,10 @@ DEVICE_ID = 0
 ILLEGAL_ADDRESS = 2  # Modbus exception code 02
 
 
-@dataclass
-class PlcProcess:
-    proc: subprocess.Popen
-    port: int
-
-    def kill(self) -> None:
-        if self.proc.poll() is None:
-            self.proc.kill()
-            self.proc.wait(timeout=5)
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _spawn_plc() -> PlcProcess:
-    port = _free_port()
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "plc", str(port)],
-        cwd=REPO_ROOT,
-        env=os.environ | {"PYTHONPATH": str(REPO_ROOT / "src")},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    plc = PlcProcess(proc, port)
-    for _ in range(100):
-        if proc.poll() is not None:
-            raise RuntimeError(f"PLC exited early:\n{proc.stdout.read()}")
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                return plc
-        except OSError:
-            time.sleep(0.05)
-    plc.kill()
-    raise RuntimeError(f"PLC never listened on {port}:\n{proc.stdout.read()}")
-
-
 @pytest.fixture(scope="module")
 def plc():
     """One PLC for the tests that only read and write registers."""
-    process = _spawn_plc()
+    process = spawn("plc", free_port())
     yield process
     process.kill()
 
@@ -92,7 +48,7 @@ def plc():
 @pytest.fixture
 def own_plc():
     """A PLC of this test's own, for tests that count connections or kill it."""
-    process = _spawn_plc()
+    process = spawn("plc", free_port())
     yield process
     process.kill()
 

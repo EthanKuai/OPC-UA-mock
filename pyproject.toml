@@ -24,4 +24,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/contract", "src/machine", "src/plc", "src/gateway"]
+packages = ["src/contract", "src/machine", "src/plc", "src/gateway", "src/client"]
