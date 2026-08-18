@@ -69,6 +69,10 @@ class RegisterBlock:
         return range(self.base, self.base + len(self.layout))
 
 
+WORD_ORDERS = ("high_first", "low_first")
+BYTE_ORDERS = ("big", "little")
+
+
 @dataclass(frozen=True)
 class Meta:
     namespace_uri: str

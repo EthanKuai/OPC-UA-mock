@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 
 from .model import (
+    BYTE_ORDERS,
+    WORD_ORDERS,
     Contract,
     ContractError,
     Meta,
@@ -53,8 +55,22 @@ def load_contract(path: str | Path) -> Contract:
 
 
 def _validate(contract: Contract) -> None:
+    _check_orders(contract.meta)
     _check_duplicate_names(contract.signals)
     _check_no_overlaps(contract)
+
+
+def _check_orders(meta: Meta) -> None:
+    # Every 32-bit codec decision reads these, so an unrecognised value must
+    # fail at load time rather than silently decode to garbage.
+    if meta.word_order not in WORD_ORDERS:
+        raise ContractError(
+            f"word_order must be one of {WORD_ORDERS}, got {meta.word_order!r}"
+        )
+    if meta.byte_order not in BYTE_ORDERS:
+        raise ContractError(
+            f"byte_order must be one of {BYTE_ORDERS}, got {meta.byte_order!r}"
+        )
 
 
 def _check_duplicate_names(signals: tuple[Signal, ...]) -> None:

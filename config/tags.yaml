@@ -11,10 +11,20 @@ signals:
     modbus: {table: holding, addr: 10, type: uint16, scale: 0.001}
     opcua: {id: "s=Conveyor1.SpeedSetpoint", type: Double, unit: "m/s", access: RW}
     owner: gateway              # who is allowed to write it
+  - name: Conveyor1.RampTime
+    iec: "%MD12"
+    modbus: {table: holding, addr: 12, type: float32}
+    opcua: {id: "s=Conveyor1.RampTime", type: Float, unit: "s", access: RW}
+    owner: gateway
   - name: Conveyor1.ActualSpeed
     iec: "%MW20"
     modbus: {table: input, addr: 20, type: uint16, scale: 0.001}
     opcua: {id: "s=Conveyor1.ActualSpeed", type: Double, unit: "m/s", access: RO}
+    owner: plc
+  - name: Conveyor1.Position
+    iec: "%MD30"
+    modbus: {table: input, addr: 30, type: float32}
+    opcua: {id: "s=Conveyor1.Position", type: Float, unit: "m", access: RO}
     owner: plc
 
 command_block:                  # written atomically with FC16

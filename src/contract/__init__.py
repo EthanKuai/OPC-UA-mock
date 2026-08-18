@@ -1,3 +1,5 @@
+from .codec import decode, encode, value_to_words, words_to_value
+from .commands import AckResult, CmdCode
 from .loader import load_contract
 from .model import (
     Contract,
@@ -10,6 +12,8 @@ from .model import (
 )
 
 __all__ = [
+    "AckResult",
+    "CmdCode",
     "Contract",
     "ContractError",
     "Meta",
@@ -17,5 +21,9 @@ __all__ = [
     "OpcUaMapping",
     "RegisterBlock",
     "Signal",
+    "decode",
+    "encode",
     "load_contract",
+    "value_to_words",
+    "words_to_value",
 ]
