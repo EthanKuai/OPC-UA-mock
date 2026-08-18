@@ -16,7 +16,16 @@ def test_loads_real_contract():
     assert contract.meta.scan_period_ms == 10
 
     names = {s.name for s in contract.signals}
-    assert names == {"Conveyor1.SpeedSetpoint", "Conveyor1.ActualSpeed"}
+    assert names == {
+        "Conveyor1.SpeedSetpoint",
+        "Conveyor1.RampTime",
+        "Conveyor1.ActualSpeed",
+        "Conveyor1.Position",
+    }
+
+    position = next(s for s in contract.signals if s.name == "Conveyor1.Position")
+    assert position.modbus.type == "float32"
+    assert position.modbus.width == 2  # a 32-bit value spans two registers
 
     setpoint = next(s for s in contract.signals if s.name == "Conveyor1.SpeedSetpoint")
     assert setpoint.modbus.table == "holding"
