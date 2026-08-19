@@ -15,3 +15,6 @@ rogue:
 
 certs:
     uv run python -m security
+
+latency:
+    uv run pytest tests/test_latency.py -s -q
