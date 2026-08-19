@@ -9,7 +9,6 @@ been decided on the wire.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -21,10 +20,10 @@ from gateway import (
     CONTENDED_STATUS,
     CommandContended,
     CommandHandshake,
-    Gateway,
     ModbusLink,
 )
-from processes import free_port, launch, spawn, wait_for_port
+from plant import serving
+from processes import free_port, launch, spawn
 from rogue import RogueMaster
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -102,23 +101,6 @@ async def wait_for_ack(
             return
         await asyncio.sleep(0.02)
     raise AssertionError(f"PLC never acknowledged the rogue's seq={seq}")
-
-
-@asynccontextmanager
-async def serving(contract: Contract, plc_port: int):
-    """The whole northbound stack, for the one test that needs to see what a
-    client sees rather than what the wire holds."""
-    port = free_port()
-    endpoint = f"opc.tcp://127.0.0.1:{port}/plant/server/"
-    gateway = Gateway(contract, "127.0.0.1", plc_port, endpoint)
-    await gateway.init()
-    task = asyncio.create_task(gateway.run())
-    try:
-        await wait_for_port(port)
-        yield endpoint
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_the_rogue_writes_a_signal_the_contract_gives_to_the_gateway(
