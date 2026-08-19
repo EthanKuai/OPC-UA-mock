@@ -7,14 +7,17 @@ to the contract appears on OPC UA without touching this file.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from datetime import UTC, datetime
 
 from asyncua import Server, ua
 from asyncua.common.methods import uamethod
+from asyncua.crypto.permission_rules import User, UserRole
 from pymodbus.exceptions import ModbusException
 
 from contract import AckResult, CmdCode, Contract, Signal, encode
+from security import RejectingValidator, ServerSecurity
 
 from .commands import CommandContended, CommandHandshake, CommandTimeout
 from .poller import ModbusLink, Poller, Reading
@@ -39,6 +42,22 @@ STALE_STATUS = ua.StatusCodes.BadCommunicationError
 CONTENDED_STATUS = ua.StatusCodes.BadSequenceNumberUnknown
 
 
+class _Operators:
+    """The UserName token half of the endpoint: a name and a password, checked
+    against the accounts the gateway was started with."""
+
+    def __init__(self, users: dict[str, str]) -> None:
+        self.users = users
+
+    def get_user(self, iserver, username=None, password=None, certificate=None):
+        expected = self.users.get(username or "")
+        if expected is None or password is None:
+            return None
+        if not hmac.compare_digest(expected, password):
+            return None
+        return User(role=UserRole.User, name=username)
+
+
 class _WriteWatcher:
     """Server-side subscription: a client write to a setpoint node has to
     reach the PLC, and this is where it is noticed."""
@@ -57,12 +76,16 @@ class Gateway:
         plc_host: str,
         plc_port: int,
         endpoint: str,
+        security: ServerSecurity | None = None,
     ) -> None:
         self.contract = contract
         self.link = ModbusLink(contract, plc_host, plc_port)
         self.poller = Poller(self.link, contract)
         self.commands = CommandHandshake(self.link, contract)
-        self.server = Server()
+        self.security = security
+        self.server = Server(
+            user_manager=_Operators(security.users) if security else None
+        )
         self.endpoint = endpoint
 
         self.idx: int | None = None
@@ -76,6 +99,8 @@ class Gateway:
 
     async def init(self) -> None:
         await self.server.init()
+        if self.security is not None:
+            await self._lock_down(self.security)
         # Bind every interface. asyncua rewrites the advertised endpoint to the
         # address the client actually reached us on, so a client that resolves
         # this host gets an endpoint it can resolve back.
@@ -88,6 +113,28 @@ class Gateway:
             self.contract.meta.namespace_uri
         )
         await self._build_address_space()
+
+    async def _lock_down(self, security: ServerSecurity) -> None:
+        """One encrypted endpoint, one identity token, one trust list."""
+        # The URI has to match the one inside the certificate, or the server
+        # refuses its own certificate before any client turns up.
+        await self.server.set_application_uri(security.application_uri)
+        await self.server.load_certificate(security.certificate)
+        await self.server.load_private_key(security.private_key)
+        # No NoSecurity endpoint at all, so an anonymous client has nothing to
+        # connect to rather than something to be turned away from.
+        self.server.set_security_policy(
+            [ua.SecurityPolicyType.Basic256Sha256_SignAndEncrypt]
+        )
+        self.server.set_identity_tokens([ua.UserNameIdentityToken])
+
+        validator = RejectingValidator(security.trusted, security.rejected)
+        await validator.load()
+        self.server.set_certificate_validator(validator)
+        log.info(
+            "Basic256Sha256/SignAndEncrypt, UserName only, trusting %s",
+            security.trusted,
+        )
 
     async def _build_address_space(self) -> None:
         plant = await self.server.nodes.objects.add_object(
@@ -281,7 +328,12 @@ class Gateway:
                 self.link.close()
 
 
-async def serve(contract: Contract, plc: tuple[str, int], endpoint: str) -> None:
-    gateway = Gateway(contract, plc[0], plc[1], endpoint)
+async def serve(
+    contract: Contract,
+    plc: tuple[str, int],
+    endpoint: str,
+    security: ServerSecurity | None = None,
+) -> None:
+    gateway = Gateway(contract, plc[0], plc[1], endpoint, security)
     await gateway.init()
     await gateway.run()

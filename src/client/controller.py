@@ -17,8 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from asyncua import Client, Node, ua
+from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
 
 from contract import CmdCode, Contract, Signal
+from security import ClientSecurity
 
 log = logging.getLogger("client")
 
@@ -29,6 +31,10 @@ PLANT = "Plant"
 # How often the server may send a notification batch. Nothing changes faster
 # than the gateway polls, so there is no point asking for less than that.
 PUBLISH_PERIOD_MS = 100
+
+# How often the server is asked to look at each node. Named rather than left
+# to asyncua's default because it is a term in the latency budget.
+SAMPLING_PERIOD_MS = 50
 
 # How long to wait between attempts to get the session back.
 RECONNECT_PERIOD = 1.0
@@ -95,11 +101,17 @@ class _ChangeHandler:
 
 class DeviceController:
     def __init__(
-        self, contract: Contract, endpoint: str, *, deadband: float = DEADBAND
+        self,
+        contract: Contract,
+        endpoint: str,
+        *,
+        deadband: float = DEADBAND,
+        security: ClientSecurity | None = None,
     ) -> None:
         self.contract = contract
         self.endpoint = endpoint
         self.deadband = deadband
+        self.security = security
         self.client = Client(endpoint)
         self.client.connection_lost_callback = self._connection_lost
 
@@ -119,12 +131,30 @@ class DeviceController:
     # ---------------------------------------------------------------- connect
 
     async def connect(self) -> None:
+        if self.security is not None:
+            await self._present(self.security)
         await self.client.connect()
         self.idx = await self.client.get_namespace_index(
             self.contract.meta.namespace_uri
         )
         log.info("%s -> ns=%d", self.contract.meta.namespace_uri, self.idx)
         await self._resolve()
+
+    async def _present(self, security: ClientSecurity) -> None:
+        """Certificate, key and account, in that order. Applied on every
+        connect, so a reconnection is as authenticated as the first one."""
+        # Announced URI and certificate URI have to agree or the gateway files
+        # this connection under rejected without ever reading the account.
+        self.client.application_uri = security.application_uri
+        await self.client.set_security(
+            SecurityPolicyBasic256Sha256,
+            certificate=str(security.certificate),
+            private_key=str(security.private_key),
+            server_certificate=str(security.server_certificate),
+            mode=ua.MessageSecurityMode.SignAndEncrypt,
+        )
+        self.client.set_user(security.username)
+        self.client.set_password(security.password)
 
     async def disconnect(self) -> None:
         self._closing = True
@@ -211,7 +241,8 @@ class DeviceController:
             PUBLISH_PERIOD_MS, _ChangeHandler(self, sink)
         )
         await self._sub.subscribe_data_change(
-            [self._nodes[s.name] for s in self.contract.signals]
+            [self._nodes[s.name] for s in self.contract.signals],
+            sampling_interval=SAMPLING_PERIOD_MS,
         )
 
     def report(self, update: Update) -> bool:

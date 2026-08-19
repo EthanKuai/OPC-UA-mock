@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 
 from contract import load_contract
+from security import Certificates
 
 from .server import serve
 
-CONFIG = Path(__file__).resolve().parents[2] / "config" / "tags.yaml"
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "config" / "tags.yaml"
+CERTS = ROOT / "certs"
 PLC_HOST = "127.0.0.1"
 PLC_PORT = 5020
 # Bind every interface; asyncua rewrites the advertised host to the one the
@@ -24,10 +27,16 @@ async def main(opcua_port: int, plc_port: int) -> None:
     # at INFO. At one poll per 100 ms that buries the gateway's own log.
     logging.getLogger("asyncua").setLevel(logging.WARNING)
 
+    certs = Certificates(CERTS)
+    if not certs.gateway_cert.is_file():
+        # Refusing to start beats quietly serving an unencrypted endpoint.
+        raise SystemExit(f"no certificate at {certs.gateway_cert}; run `just certs`")
+
     await serve(
         load_contract(CONFIG),
         (PLC_HOST, plc_port),
         f"opc.tcp://0.0.0.0:{opcua_port}{PATH}",
+        certs.server(),
     )
 
 

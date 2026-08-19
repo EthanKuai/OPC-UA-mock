@@ -2,7 +2,7 @@
 
 Its OPC UA traffic still crosses a socket, so the protocol stays real. Keeping
 the object here is what lets a test push a decoy namespace in front of the
-plant's, or take the server away mid-subscription.
+plant's, hand it a certificate, or take the server away mid-subscription.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from contract import Contract
 from gateway import Gateway
 from processes import free_port, wait_for_port
+from security import ServerSecurity
 
 
 class GatewayHarness:
@@ -20,17 +21,24 @@ class GatewayHarness:
     endpoint."""
 
     def __init__(
-        self, contract: Contract, plc_port: int, decoy: str | None = None
+        self,
+        contract: Contract,
+        plc_port: int,
+        decoy: str | None = None,
+        security: ServerSecurity | None = None,
     ) -> None:
         self.contract = contract
         self.plc_port = plc_port
         self.decoy = decoy
+        self.security = security
         self.port = free_port()
         self.endpoint = f"opc.tcp://127.0.0.1:{self.port}/plant/server/"
         self.task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        gateway = Gateway(self.contract, "127.0.0.1", self.plc_port, self.endpoint)
+        gateway = Gateway(
+            self.contract, "127.0.0.1", self.plc_port, self.endpoint, self.security
+        )
         if self.decoy is not None:
             # Slip in between the server coming up and the gateway registering
             # the contract's URI, so the plant does not land on index 2.
@@ -55,9 +63,11 @@ class GatewayHarness:
 
 
 @asynccontextmanager
-async def serving(contract: Contract, plc_port: int):
+async def serving(
+    contract: Contract, plc_port: int, security: ServerSecurity | None = None
+):
     """A gateway for the length of a `with` block. Yields its endpoint."""
-    harness = GatewayHarness(contract, plc_port)
+    harness = GatewayHarness(contract, plc_port, security=security)
     await harness.start()
     try:
         yield harness.endpoint

@@ -12,3 +12,6 @@ client:
 
 rogue:
     uv run python -m rogue
+
+certs:
+    uv run python -m security
