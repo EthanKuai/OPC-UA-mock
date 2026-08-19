@@ -15,6 +15,12 @@ from gateway import Gateway
 from processes import free_port, wait_for_port
 from security import ServerSecurity
 
+# asyncua's shutdown waits for every client connection to end, and a connection
+# the server itself refused does not reliably end - so a suite that tests
+# refusals hangs here about half the time. Bounded, because the event loop this
+# runs on is thrown away immediately afterwards either way.
+STOP_TIMEOUT = 5.0
+
 
 class GatewayHarness:
     """A gateway that can be started, stopped and started again on the same
@@ -58,7 +64,7 @@ class GatewayHarness:
         if self.task is None:
             return
         self.task.cancel()
-        await asyncio.gather(self.task, return_exceptions=True)
+        await asyncio.wait({self.task}, timeout=STOP_TIMEOUT)
         self.task = None
 
 
