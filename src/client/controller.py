@@ -14,7 +14,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from asyncua import Client, Node, ua
 from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
@@ -280,6 +280,31 @@ class DeviceController:
         await self._nodes[name].write_value(
             ua.Variant(value, ua.VariantType[signal.opcua.type])
         )
+
+    async def history(
+        self, name: str, *, seconds: float = 60.0, limit: int = 0
+    ) -> list[Update]:
+        """What the server kept for this signal, most recent last.
+
+        Not a way around the no-polling rule: this asks once for what has
+        already happened, rather than repeatedly for what is happening.
+        """
+        end = datetime.now(UTC)
+        values = await self._nodes[name].read_raw_history(
+            starttime=end - timedelta(seconds=seconds),
+            endtime=end,
+            numvalues=limit,
+        )
+        signal = next(s for s in self.contract.signals if s.name == name)
+        return [
+            Update(
+                signal,
+                dv.Value.Value if dv.Value is not None else None,
+                dv.StatusCode,
+                dv.SourceTimestamp,
+            )
+            for dv in values
+        ]
 
     async def command(self, code: CmdCode) -> None:
         """Issue a command as a Method call.
