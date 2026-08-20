@@ -39,6 +39,18 @@ def test_loads_real_contract():
     assert contract.ack_block.base == 110
 
 
+def test_historize_is_declared_per_signal_and_off_by_default():
+    contract = load_contract(REPO_ROOT / "config" / "tags.yaml")
+    by_name = {s.name: s for s in contract.signals}
+
+    # What the machine measured is worth looking back at.
+    assert by_name["Conveyor1.ActualSpeed"].opcua.historize
+    assert by_name["Conveyor1.Position"].opcua.historize
+    # What somebody asked for is not; the client already knows what it wrote.
+    assert not by_name["Conveyor1.SpeedSetpoint"].opcua.historize
+    assert not by_name["Conveyor1.RampTime"].opcua.historize
+
+
 def test_duplicate_signal_name_raises():
     with pytest.raises(ContractError, match="duplicate signal name"):
         load_contract(FIXTURES / "duplicate_name.yaml")

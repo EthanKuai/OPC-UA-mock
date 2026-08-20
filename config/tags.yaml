@@ -19,12 +19,12 @@ signals:
   - name: Conveyor1.ActualSpeed
     iec: "%MW20"
     modbus: {table: input, addr: 20, type: uint16, scale: 0.001}
-    opcua: {id: "s=Conveyor1.ActualSpeed", type: Double, unit: "m/s", access: RO}
+    opcua: {id: "s=Conveyor1.ActualSpeed", type: Double, unit: "m/s", access: RO, historize: true}
     owner: plc
   - name: Conveyor1.Position
     iec: "%MD30"
     modbus: {table: input, addr: 30, type: float32}
-    opcua: {id: "s=Conveyor1.Position", type: Float, unit: "m", access: RO}
+    opcua: {id: "s=Conveyor1.Position", type: Float, unit: "m", access: RO, historize: true}
     owner: plc
 
 command_block:                  # written atomically with FC16

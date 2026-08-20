@@ -43,6 +43,10 @@ class OpcUaMapping:
     type: str
     access: str
     unit: str | None = None
+    # Whether the server keeps a history of this signal. A property of the
+    # northbound interface, like access and unit, so it belongs in the
+    # contract rather than in whoever happens to build the address space.
+    historize: bool = False
 
 
 @dataclass(frozen=True)
