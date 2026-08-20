@@ -207,13 +207,21 @@ class DeviceController:
     async def _reconnect(self) -> None:
         """Rebuild the session, re-resolve every node, re-subscribe.
 
-        asyncua's own auto_reconnect is not usable against a server that has
-        restarted: its transfer_subscriptions can land on a subscription id the
-        new server happens to have reissued to somebody else, and the republish
-        that follows never terminates, because the server answers an unknown
-        sequence number with an empty message instead of BadMessageNotAvailable.
-        Resolving again from scratch is also the only way to notice that the
-        namespace index moved while we were away.
+        asyncua's own auto_reconnect (transfer_subscriptions, falling back to
+        recreate) was measured against a restarted gateway and works: its
+        _sub_id_counter resets to 77 on every restart, but the gateway's own
+        _historize() subscription always claims 78 first, before any client
+        subscribes, so this controller's one subscription lands on 79 both
+        before and after a restart and never collides with a stale id. That
+        is specific to this topology - one historize subscription, one
+        client subscription, always in that order - not a property of
+        asyncua in general; a second client or a second server-side
+        subscription could still land two ids on top of each other and hit
+        the failure mode this used to work around.
+
+        Resolving again from scratch is the reason this stays hand-rolled:
+        it is the only way to notice that the namespace index moved while
+        we were away.
         """
         while not self._closing:
             await asyncio.sleep(RECONNECT_PERIOD)
