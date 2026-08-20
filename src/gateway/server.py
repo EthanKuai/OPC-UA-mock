@@ -7,6 +7,7 @@ to the contract appears on OPC UA without touching this file.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 from datetime import UTC, datetime
@@ -87,6 +88,13 @@ class Gateway:
             user_manager=_Operators(security.users) if security else None
         )
         self.endpoint = endpoint
+
+        # Set once the gateway is serving *and* watching its own writable
+        # nodes. An open port is not the same thing: a setpoint written before
+        # the watcher exists is accepted by the address space and then never
+        # reaches the PLC.
+        self.ready = asyncio.Event()
+        self._stopping = asyncio.Event()
 
         self.idx: int | None = None
         self._node_ids: dict[str, ua.NodeId] = {}
@@ -322,10 +330,31 @@ class Gateway:
                 self.contract.meta.namespace_uri,
                 self.contract.meta.poll_period_ms,
             )
+            self.ready.set()
+            # Polling runs as its own task so that stopping can be asked for
+            # rather than imposed. Cancelling run() from outside interrupts
+            # asyncua's shutdown half way through, and the listening socket is
+            # never closed - the port stays taken until the process exits.
+            poll = asyncio.create_task(self.poller.run(self.publish))
+            stop = asyncio.create_task(self._stopping.wait())
             try:
-                await self.poller.run(self.publish)
+                done, pending = await asyncio.wait(
+                    {poll, stop}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                for task in done:
+                    # The poll loop ends only by failing; say so rather than
+                    # returning as though the gateway had been asked to stop.
+                    task.result()
             finally:
+                self.ready.clear()
                 self.link.close()
+
+    async def stop(self) -> None:
+        """Ask run() to return, so the server shuts itself down properly."""
+        self._stopping.set()
 
 
 async def serve(

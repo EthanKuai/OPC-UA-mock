@@ -8,6 +8,7 @@ plant's, hand it a certificate, or take the server away mid-subscription.
 from __future__ import annotations
 
 import asyncio
+import socket
 from contextlib import asynccontextmanager
 
 from contract import Contract
@@ -15,10 +16,13 @@ from gateway import Gateway
 from processes import free_port, wait_for_port
 from security import ServerSecurity
 
+# A gateway that has not finished starting drops the writes a test makes.
+READY_TIMEOUT = 20.0
+
 # asyncua's shutdown waits for every client connection to end, and a connection
-# the server itself refused does not reliably end - so a suite that tests
-# refusals hangs here about half the time. Bounded, because the event loop this
-# runs on is thrown away immediately afterwards either way.
+# that ended badly - a peer that went away mid-request, or one the server
+# refused - does not reliably finish. Bounded, because the event loop this runs
+# on is thrown away immediately afterwards either way.
 STOP_TIMEOUT = 5.0
 
 
@@ -40,6 +44,7 @@ class GatewayHarness:
         self.port = free_port()
         self.endpoint = f"opc.tcp://127.0.0.1:{self.port}/plant/server/"
         self.task: asyncio.Task | None = None
+        self.gateway: Gateway | None = None
 
     async def start(self) -> None:
         gateway = Gateway(
@@ -57,15 +62,36 @@ class GatewayHarness:
             gateway.server.init = init_then_decoy
 
         await gateway.init()
+        self.gateway = gateway
         self.task = asyncio.create_task(gateway.run())
         await wait_for_port(self.port)
+        await asyncio.wait_for(gateway.ready.wait(), READY_TIMEOUT)
 
     async def stop(self) -> None:
         if self.task is None:
             return
-        self.task.cancel()
-        await asyncio.wait({self.task}, timeout=STOP_TIMEOUT)
+        if self.gateway is not None:
+            await self.gateway.stop()
+        done, _ = await asyncio.wait({self.task}, timeout=STOP_TIMEOUT)
+        if not done:
+            self.task.cancel()
+        # The listening socket goes before the stuck connections do, but not
+        # instantly, and this harness hands the same port straight back to the
+        # next gateway.
+        await self._wait_for_port_free()
         self.task = None
+
+    async def _wait_for_port_free(self, timeout: float = STOP_TIMEOUT) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                with socket.socket() as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    probe.bind(("127.0.0.1", self.port))
+                return
+            except OSError:
+                await asyncio.sleep(0.05)
+        raise AssertionError(f"port {self.port} never came free")
 
 
 @asynccontextmanager

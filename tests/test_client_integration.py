@@ -74,6 +74,24 @@ class Collector:
                 return
         raise AssertionError("updates never stopped arriving")
 
+    async def wait_for_value(
+        self, name: str, value: float, timeout: float = 5.0
+    ) -> Update:
+        """Wait for `name` to come to rest on `value`.
+
+        Not the same as the first update after a write: the gateway mirrors a
+        poll, so a poll already in flight when the write lands republishes the
+        value the PLC still held, and the client sees it flicker back before
+        it settles.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            seen = self.of(name)
+            if seen and seen[-1].value == pytest.approx(value):
+                return seen[-1]
+            await asyncio.sleep(0.05)
+        raise AssertionError(f"{name} never settled on {value} within {timeout}s")
+
     async def wait_for(self, name: str, timeout: float = 5.0) -> Update:
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
@@ -142,8 +160,7 @@ async def test_notifications_follow_changes_not_the_poll_clock(plant):
     assert stack.updates.updates == [], "notified without anything changing"
 
     await stack.controller.write_setpoint(SETPOINT, 1.0)
-    update = await stack.updates.wait_for(SETPOINT)
-    assert update.value == pytest.approx(1.0)
+    await stack.updates.wait_for_value(SETPOINT, 1.0)
 
 
 async def test_jitter_inside_the_deadband_is_not_reported(plant):
@@ -168,8 +185,7 @@ async def test_jitter_inside_the_deadband_is_not_reported(plant):
     # The same subscription must still report a real move, or the test above
     # would pass just as well with a broken subscription.
     await stack.controller.write_setpoint(SETPOINT, 1.5)
-    update = await stack.updates.wait_for(SETPOINT)
-    assert update.value == pytest.approx(1.5)
+    await stack.updates.wait_for_value(SETPOINT, 1.5)
 
 
 async def test_the_subscription_is_restored_after_the_gateway_goes_away(plant, contract):
