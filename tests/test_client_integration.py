@@ -239,9 +239,11 @@ async def test_a_dead_plc_reaches_the_client_as_a_bad_status(plant, plc, contrac
     """Killing the PLC has to arrive as a status change, not as silence and a
     stale value that still looks Good.
 
-    This is what rules out a server-side deadband: the values do not move when
-    the PLC dies, so a filter that weighs status changes against the deadband
-    drops the one notification that matters.
+    This is what rules out a server-side deadband: on a bad status the server
+    nulls Value before any callback sees it, and diffing that null against the
+    last real value is what raises TypeError inside asyncua's own deadband
+    check (see DEADBAND in client/controller.py) - swallowed and logged there,
+    so the one notification that matters never reaches the client.
     """
     stack = await plant()
 

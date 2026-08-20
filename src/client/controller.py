@@ -40,11 +40,17 @@ SAMPLING_PERIOD_MS = 50
 RECONNECT_PERIOD = 1.0
 
 # Absolute deadband, in engineering units, on analogue signals. Applied here
-# rather than by ua.DataChangeFilter, for two reasons found in asyncua 2.0.1:
-# its server ANDs the deadband test with the change test, so a poll failure
-# whose value sits inside the band never reaches the client at all; and its
-# deadband arithmetic raises TypeError on the null value a bad status carries.
-# A percent deadband is worse still - accepted, then ignored with a warning.
+# rather than by ua.DataChangeFilter - re-checked against the installed
+# asyncua 2.0.1, and the reason is worse than "sometimes suppressed":
+# per spec the server nulls Value whenever StatusCode is bad, before any
+# datachange callback sees it, so a poll failure always diffs a real old
+# value against a null one. _is_deadband_exceeded's guard for that
+# (`cur.Value is None`) checks the Variant wrapper, not the None inside it,
+# so a null Variant slips past it and `cur.Value.Value - old.Value.Value`
+# raises TypeError. asyncua's own dispatch swallows that exception and only
+# logs it - so every poll failure, not just ones inside the band, would
+# never reach the client. A percent deadband is worse still - accepted,
+# then ignored with a warning.
 DEADBAND = 0.01
 
 # Deadband only means anything for a value you can subtract.
