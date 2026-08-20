@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from asyncua import Server, ua
 from asyncua.common.methods import uamethod
@@ -36,6 +36,11 @@ ACK_STATUS = {
 
 # The poll failed, so every value behind it is unknown. Not stale-but-Good.
 STALE_STATUS = ua.StatusCodes.BadCommunicationError
+
+# How much history to keep for the signals the contract asks to be historised.
+# In memory, so both limits matter: whichever is reached first wins.
+HISTORY_PERIOD = timedelta(minutes=10)
+HISTORY_COUNT = 10_000
 
 # Another master has commanded the PLC since we last did. The command was not
 # sent: the caller's picture of the plant is already wrong, and issuing on top
@@ -164,6 +169,23 @@ class Gateway:
         # The command block is one PLC-wide resource in the contract, not a
         # per-device one, so the methods that drive it live at plant level.
         await self._add_commands(plant)
+
+    async def _historize(self) -> None:
+        """Keep the signals the contract says to keep.
+
+        The history subscribes to the node, so it stores changes rather than
+        polls: the gateway rewrites every node every poll period, and a value
+        that did not move is not a sample worth keeping.
+        """
+        keep = [s for s in self.contract.signals if s.opcua.historize]
+        if not keep:
+            return
+        await self.server.historize_node_data_change(
+            [self.server.get_node(self._node_ids[s.name]) for s in keep],
+            HISTORY_PERIOD,
+            HISTORY_COUNT,
+        )
+        log.info("historising %s", ", ".join(s.name for s in keep))
 
     async def _add_signal(self, parent, signal: Signal, browse_name: str) -> None:
         node_id = ua.NodeId.from_string(f"ns={self.idx};{signal.opcua.id}")
@@ -314,6 +336,11 @@ class Gateway:
             # values a client sees are the PLC's and not this server's zeros.
             for reading in await self.poller.poll_once():
                 await self.publish(reading)
+
+            # After the server is up: historising subscribes to the nodes, and
+            # a subscription made before there is a server to publish it never
+            # delivers anything past the value it started with.
+            await self._historize()
 
             watcher = await self.server.create_subscription(50, _WriteWatcher(self))
             await watcher.subscribe_data_change(
