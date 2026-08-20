@@ -58,21 +58,23 @@ masters it returns to where it started and looks untouched.
 
 ## Latency budget
 
-End-to-end northbound latency is the sum of four configured periods:
+End-to-end northbound latency is the sum of three configured periods:
 
 | term | value |
 |---|---|
 | PLC scan period | 10 ms |
 | gateway poll period | 100 ms |
-| sampling interval | 50 ms |
 | publishing interval | 100 ms |
-| **budget** | **260 ms** |
+| **budget** | **210 ms** |
+
+Not four: asyncua's server does not sample - it notifies on change - so the
+50 ms sampling interval the client requests is agreed to and then never spent.
+It sets the effective sampling rate, but that rate is already the gateway's
+100 ms poll period, already counted above.
 
 A representative run on loopback, 25 samples: p50 99.6 ms, p99 200.0 ms.
-`just latency` reprints the table. The two
-100 ms terms dominate and the scan is noise. The sampling interval turns out
-to be pure headroom, because asyncua's server does not sample - it notifies on
-change - so the term is in the budget without being in the latency.
+`just latency` reprints the table. The two 100 ms terms dominate and the scan
+is noise.
 
 `tests/test_latency.py` writes a setpoint straight into the PLC over Modbus,
 starts the clock there, and stops it when the resulting speed change reaches

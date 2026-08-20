@@ -1,9 +1,11 @@
-"""End-to-end latency, and the four periods it is made of.
+"""End-to-end latency, and the three periods it is made of.
 
 The stimulus is a register written straight into the PLC over Modbus, so the
 clock starts at a moment this test knows exactly. What is measured from there
 is the northbound path and nothing else: the PLC's next scan, the gateway's
-next poll, the server's sampling of the node, and the next publish.
+next poll, and the next publish. The sampling interval the client requests is
+not a fourth term - asyncua's server does not sample, it notifies on change -
+so it is reported for context and left out of the budget.
 
 Security is left off. The budget is made of periods; encrypting the channel
 would change the number without changing any of the terms being measured.
@@ -83,7 +85,6 @@ async def test_latency_stays_inside_the_configured_budget(contract, plc):
     budget = {
         "PLC scan period": contract.meta.scan_period_ms,
         "gateway poll period": contract.meta.poll_period_ms,
-        "sampling interval": SAMPLING_PERIOD_MS,
         "publishing interval": PUBLISH_PERIOD_MS,
     }
     total = sum(budget.values())
@@ -115,6 +116,7 @@ async def test_latency_stays_inside_the_configured_budget(contract, plc):
     for term, value in budget.items():
         print(f"  {term:<20}{value:>8}")
     print(f"  {'budget':<20}{total:>8}")
+    print(f"  {'sampling interval':<20}{SAMPLING_PERIOD_MS:>8}   (requested, not spent)")
     print(f"  {'measured p50':<20}{p50:>8.1f}")
     print(f"  {'measured p99':<20}{p99:>8.1f}   ({SAMPLES} samples)")
 
