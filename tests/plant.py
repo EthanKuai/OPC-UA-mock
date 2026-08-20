@@ -16,8 +16,10 @@ from gateway import Gateway
 from processes import free_port, wait_for_port
 from security import ServerSecurity
 
-# A gateway that has not finished starting drops the writes a test makes.
-READY_TIMEOUT = 20.0
+# A gateway whose first poll has not landed yet has nothing confirmed to
+# write against - a fixture that connects and writes right away needs this,
+# even though the gateway itself no longer needs it to stay safe.
+PRIMED_TIMEOUT = 20.0
 
 # asyncua's shutdown waits for every client connection to end, and a connection
 # that ended badly - a peer that went away mid-request, or one the server
@@ -36,11 +38,16 @@ class GatewayHarness:
         plc_port: int,
         decoy: str | None = None,
         security: ServerSecurity | None = None,
+        wait_for_primed: bool = True,
     ) -> None:
         self.contract = contract
         self.plc_port = plc_port
         self.decoy = decoy
         self.security = security
+        # A test deliberately pointed at a PLC that will never answer wants
+        # the gateway in its unprimed window for the whole test, not raced
+        # past it - see test_a_write_before_the_first_poll_is_refused_not_dropped.
+        self.wait_for_primed = wait_for_primed
         self.port = free_port()
         self.endpoint = f"opc.tcp://127.0.0.1:{self.port}/plant/server/"
         self.task: asyncio.Task | None = None
@@ -65,7 +72,8 @@ class GatewayHarness:
         self.gateway = gateway
         self.task = asyncio.create_task(gateway.run())
         await wait_for_port(self.port)
-        await asyncio.wait_for(gateway.ready.wait(), READY_TIMEOUT)
+        if self.wait_for_primed:
+            await asyncio.wait_for(gateway.primed.wait(), PRIMED_TIMEOUT)
 
     async def stop(self) -> None:
         if self.task is None:

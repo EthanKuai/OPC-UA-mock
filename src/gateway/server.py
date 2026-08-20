@@ -10,9 +10,11 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import struct
 from datetime import UTC, datetime, timedelta
 
 from asyncua import Server, ua
+from asyncua.common.callback import CallbackType
 from asyncua.common.methods import uamethod
 from asyncua.crypto.permission_rules import User, UserRole
 from pymodbus.exceptions import ModbusException
@@ -64,17 +66,6 @@ class _Operators:
         return User(role=UserRole.User, name=username)
 
 
-class _WriteWatcher:
-    """Server-side subscription: a client write to a setpoint node has to
-    reach the PLC, and this is where it is noticed."""
-
-    def __init__(self, gateway: Gateway) -> None:
-        self.gateway = gateway
-
-    async def datachange_notification(self, node, val, data) -> None:
-        await self.gateway.on_node_changed(node, val)
-
-
 class Gateway:
     def __init__(
         self,
@@ -94,19 +85,26 @@ class Gateway:
         )
         self.endpoint = endpoint
 
-        # Set once the gateway is serving *and* watching its own writable
-        # nodes. An open port is not the same thing: a setpoint written before
-        # the watcher exists is accepted by the address space and then never
-        # reaches the PLC.
-        self.ready = asyncio.Event()
+        # Set once every signal has a confirmed PLC state. Not needed for the
+        # write path itself - the value setter checks _last_words per signal
+        # regardless - but a caller that wants to write right after startup
+        # without individually handling BadWaitingForInitialData can wait on
+        # this instead.
+        self.primed = asyncio.Event()
         self._stopping = asyncio.Event()
 
         self.idx: int | None = None
         self._node_ids: dict[str, ua.NodeId] = {}
         self._by_node_id: dict[ua.NodeId, Signal] = {}
-        # What the PLC last reported, per signal, as raw registers. Registers
-        # compare exactly where scaled floats do not.
+        # What the PLC last reported, per signal, as raw registers. None until
+        # the first poll lands, which is also how a value setter knows there
+        # is nothing yet to accept a client's write against.
         self._last_words: dict[str, tuple[int, ...] | None] = {}
+        # NodeIds a Write service request is about to touch, populated by the
+        # PreWrite callback and consumed by the value setter below. Only a
+        # write that passed through here came from a client; the poll loop's
+        # own write_attribute_value() calls never do.
+        self._external_writes: set[ua.NodeId] = set()
 
     # ---------------------------------------------------------------- startup
 
@@ -126,6 +124,9 @@ class Gateway:
             self.contract.meta.namespace_uri
         )
         await self._build_address_space()
+        self.server.subscribe_server_callback(
+            CallbackType.PreWrite, self._mark_external_write
+        )
 
     async def _lock_down(self, security: ServerSecurity) -> None:
         """One encrypted endpoint, one identity token, one trust list."""
@@ -199,6 +200,7 @@ class Gateway:
         )
         if signal.opcua.access == "RW":
             await node.set_writable(True)
+            self.server.set_attribute_value_setter(node_id, self._set_signal)
         if signal.opcua.unit:
             await node.add_property(
                 ua.NodeId(f"{node_id.Identifier}.EngineeringUnits", self.idx),
@@ -279,8 +281,9 @@ class Gateway:
         vtype = ua.VariantType[reading.signal.opcua.type]
 
         if reading.ok:
-            # Record the registers before publishing: publishing wakes the
-            # write watcher, which uses them to recognise its own echo.
+            # Record the registers before publishing: publishing is what
+            # invokes the value setter, which reads _last_words to know
+            # whether this signal has a confirmed PLC state yet.
             self._last_words[reading.signal.name] = reading.words
             value = ua.DataValue(
                 Value=ua.Variant(reading.value, vtype),
@@ -300,29 +303,46 @@ class Gateway:
 
     # ------------------------------------------------------------ client writes
 
-    async def on_node_changed(self, node, value) -> None:
-        signal = self._by_node_id.get(node.nodeid)
-        if signal is None or value is None:
-            return
-        if self._last_words.get(signal.name) is None:
-            # Nothing has been polled from this address yet - either we just
-            # subscribed (asyncua delivers the node's initial value straight
-            # away, which is not a client write) or the PLC is unreachable.
-            # Either way there is no value here worth pushing down.
-            return
+    def _mark_external_write(self, event, _service) -> None:
+        """PreWrite fires only for a real client's Write service request - the
+        poll loop's own write_attribute_value() calls bypass the session
+        entirely and never reach it. Recording the NodeIds here is how the
+        value setter below tells the two apart."""
+        if event.is_external:
+            self._external_writes.update(
+                wv.NodeId for wv in event.request_params.NodesToWrite
+            )
 
-        words = tuple(encode(signal.modbus, value, self.contract.meta))
-        if words == self._last_words.get(signal.name):
-            # This is our own poll being published back, not a client write.
-            return
+    def _set_signal(self, node, attr, datavalue: ua.DataValue) -> None:
+        """The setter for every writable node's Value attribute. Runs
+        synchronously in the write path - the poll loop's republish and a
+        client's write alike - so a client's write_value() gets a real
+        StatusCode back rather than a value the address space accepted and
+        then quietly dropped.
+        """
+        if node.nodeid in self._external_writes:
+            self._external_writes.discard(node.nodeid)
+            signal = self._by_node_id[node.nodeid]
+            if self._last_words.get(signal.name) is None:
+                # Nothing has been polled from this address yet, so there is
+                # no confirmed PLC state to write against.
+                raise ua.uaerrors.BadWaitingForInitialData()
+            try:
+                words = encode(signal.modbus, datavalue.Value.Value, self.contract.meta)
+            except struct.error:
+                raise ua.uaerrors.BadOutOfRange() from None
+            # write_registers() awaits, which a setter cannot - it hands off
+            # to a task and returns the caller a synchronous accept.
+            asyncio.create_task(self._push(signal, datavalue.Value.Value, words))
+        node.attributes[attr].value = datavalue
 
+    async def _push(self, signal: Signal, value, words: list[int]) -> None:
         try:
-            await self.link.write_registers(signal.modbus.addr, list(words))
+            await self.link.write_registers(signal.modbus.addr, words)
         except (ModbusException, OSError) as exc:
             log.warning("write %s <- %s failed: %s", signal.name, value, exc)
             return
         log.info("%s <- %s", signal.name, value)
-        self._last_words[signal.name] = words
 
     # ------------------------------------------------------------------- run
 
@@ -336,20 +356,13 @@ class Gateway:
             # values a client sees are the PLC's and not this server's zeros.
             for reading in await self.poller.poll_once():
                 await self.publish(reading)
+            self.primed.set()
 
             # After the server is up: historising subscribes to the nodes, and
             # a subscription made before there is a server to publish it never
             # delivers anything past the value it started with.
             await self._historize()
 
-            watcher = await self.server.create_subscription(50, _WriteWatcher(self))
-            await watcher.subscribe_data_change(
-                [
-                    self.server.get_node(self._node_ids[s.name])
-                    for s in self.contract.signals
-                    if s.opcua.access == "RW"
-                ]
-            )
             log.info(
                 "serving %s, ns=%d %s, polling every %d ms",
                 self.endpoint,
@@ -357,7 +370,6 @@ class Gateway:
                 self.contract.meta.namespace_uri,
                 self.contract.meta.poll_period_ms,
             )
-            self.ready.set()
             # Polling runs as its own task so that stopping can be asked for
             # rather than imposed. Cancelling run() from outside interrupts
             # asyncua's shutdown half way through, and the listening socket is
@@ -376,7 +388,6 @@ class Gateway:
                     # returning as though the gateway had been asked to stop.
                     task.result()
             finally:
-                self.ready.clear()
                 self.link.close()
 
     async def stop(self) -> None:

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from asyncua import ua
 
 from client import DEADBAND, DeviceController, Update
 from contract import CmdCode, Contract, load_contract
@@ -123,9 +124,9 @@ async def plant(contract, plc):
         await controller.watch(updates)
         stack = Stack(harness, controller, updates)
         built.append(stack)
-        # An open port is not a working gateway: it subscribes to its own
-        # writable nodes only after its first poll, and a setpoint written
-        # before that is dropped. Waiting for quiet waits that window out.
+        # An open port is not a working gateway: the first poll's readings
+        # are still arriving as a burst. Waiting for quiet drains it before a
+        # test starts counting.
         await updates.settle()
         return stack
 
@@ -211,6 +212,27 @@ async def test_a_plc_owned_signal_is_refused_before_it_reaches_the_wire(plant):
 
     with pytest.raises(ValueError):
         await stack.controller.write_setpoint(POSITION, 5.0)
+
+
+async def test_a_write_before_the_first_poll_is_refused_not_dropped(contract):
+    """The listener is open before the PLC has been polled even once. A
+    setpoint written into that window has no confirmed PLC state to join, and
+    the value setter has to say so - not accept the write and let it vanish.
+
+    No plc fixture here: an unpollable PLC keeps the gateway in that window
+    for the life of the test, rather than racing to close it.
+    """
+    harness = GatewayHarness(contract, free_port(), wait_for_primed=False)
+    await harness.start()
+    controller = DeviceController(contract, harness.endpoint)
+    await controller.connect()
+    try:
+        with pytest.raises(ua.UaStatusCodeError) as raised:
+            await controller.write_setpoint(SETPOINT, 1.0)
+        assert raised.value.code == ua.StatusCodes.BadWaitingForInitialData
+    finally:
+        await controller.disconnect()
+        await harness.stop()
 
 
 async def test_a_dead_plc_reaches_the_client_as_a_bad_status(plant, plc, contract):
