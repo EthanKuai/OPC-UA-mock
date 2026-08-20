@@ -12,3 +12,9 @@ client:
 
 rogue:
     uv run python -m rogue
+
+certs:
+    uv run python -m security
+
+latency:
+    uv run pytest tests/test_latency.py -s -q

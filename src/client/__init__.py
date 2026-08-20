@@ -1,3 +1,15 @@
-from .controller import DEADBAND, DeviceController, Update
+from .controller import (
+    DEADBAND,
+    PUBLISH_PERIOD_MS,
+    SAMPLING_PERIOD_MS,
+    DeviceController,
+    Update,
+)
 
-__all__ = ["DEADBAND", "DeviceController", "Update"]
+__all__ = [
+    "DEADBAND",
+    "PUBLISH_PERIOD_MS",
+    "SAMPLING_PERIOD_MS",
+    "DeviceController",
+    "Update",
+]

@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 
 from contract import CmdCode, load_contract
+from security import Certificates
 
 from .controller import DeviceController, Update
 
-CONFIG = Path(__file__).resolve().parents[2] / "config" / "tags.yaml"
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "config" / "tags.yaml"
+CERTS = ROOT / "certs"
 ENDPOINT = "opc.tcp://127.0.0.1:4840/plant/server/"
 DEMO_SPEED = 1.0
 
@@ -28,7 +31,13 @@ async def main(endpoint: str) -> None:
     # asyncua logs every publish request at INFO, which buries the values.
     logging.getLogger("asyncua").setLevel(logging.WARNING)
 
-    controller = DeviceController(load_contract(CONFIG), endpoint)
+    certs = Certificates(CERTS)
+    if not certs.client_cert.is_file():
+        raise SystemExit(f"no certificate at {certs.client_cert}; run `just certs`")
+
+    controller = DeviceController(
+        load_contract(CONFIG), endpoint, security=certs.client()
+    )
     await controller.connect()
     await controller.watch(show)
 
