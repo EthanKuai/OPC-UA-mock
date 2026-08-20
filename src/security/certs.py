@@ -19,6 +19,11 @@ from cryptography.x509.oid import ExtendedKeyUsageOID
 GATEWAY_URI = "urn:mock.local:plant:gateway"
 CLIENT_URI = "urn:mock.local:plant:client"
 
+# asyncua's own console scripts (uaread, uawrite, uals, ...) construct a bare
+# Client() with no flag to override its application_uri, so a certificate for
+# `just inspect` has to be issued under that hardcoded default, not ours.
+INSPECT_URI = "urn:example.org:FreeOpcUa:opcua-asyncio"
+
 # Demo credentials for a mock plant. A real deployment would not keep these in
 # source, and would not give every operator the same account.
 USER = "operator"
@@ -70,6 +75,14 @@ class Certificates:
         return self.root / "client-key.pem"
 
     @property
+    def inspect_cert(self) -> Path:
+        return self.root / "inspect.der"
+
+    @property
+    def inspect_key(self) -> Path:
+        return self.root / "inspect-key.pem"
+
+    @property
     def trusted(self) -> Path:
         return self.root / "trusted"
 
@@ -106,11 +119,13 @@ async def ensure_certificates(root: Path) -> Certificates:
 
     await issue(certs.gateway_key, certs.gateway_cert, GATEWAY_URI, server=True)
     await issue(certs.client_key, certs.client_cert, CLIENT_URI, server=False)
+    await issue(certs.inspect_key, certs.inspect_cert, INSPECT_URI, server=False)
 
     # Trusting is a decision, not a by-product of generating. This one line is
     # the entire difference between the client and an intruder: both have a
     # perfectly valid certificate, and only one of them is in this folder.
     shutil.copyfile(certs.client_cert, certs.trusted / certs.client_cert.name)
+    shutil.copyfile(certs.inspect_cert, certs.trusted / certs.inspect_cert.name)
     return certs
 
 

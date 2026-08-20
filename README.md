@@ -30,7 +30,11 @@ just client     # terminal 3
 just rogue      # terminal 4, when you want to see the plant taken away
 ```
 
-`just test` runs everything. `just latency` prints the budget below.
+`just test` runs everything. `just latency` prints the budget below. `just
+inspect` browses the live address space with asyncua's own console scripts
+(`uals`, `uaread`, `uawrite`, `uacall`, `uasubscribe`, `uadiscover` - see the
+justfile for the rest of them); for a GUI without Wine, `pip install
+opcua-client-gui` is the closest thing to UaExpert.
 
 ## The five processes
 

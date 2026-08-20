@@ -13,6 +13,7 @@ async def main(root: Path) -> None:
     certs = await ensure_certificates(root)
     print(f"gateway  {certs.gateway_cert}")
     print(f"client   {certs.client_cert}")
+    print(f"inspect  {certs.inspect_cert}   (for `just inspect`, asyncua's own CLI)")
     print(f"trusted  {certs.trusted}   ({len(list(certs.trusted.iterdir()))} certificate(s))")
     print(f"rejected {certs.rejected}")
     print(f"user     {USER}")
