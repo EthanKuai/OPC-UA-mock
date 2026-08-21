@@ -12,6 +12,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "ruff>=0.6",
 ]
 
 [tool.pytest.ini_options]
@@ -33,3 +34,22 @@ packages = [
     "src/rogue",
     "src/security",
 ]
+
+[tool.ruff]
+extend-exclude = [
+    "src/contract/loader.py",
+    "src/gateway/server.py",
+    "src/plc/modbus_server.py",
+    "src/plc/scan.py",
+    "src/security/__main__.py",
+    "src/security/certs.py",
+    "src/security/validator.py",
+    "tests/test_client_integration.py",
+    "tests/test_latency.py",
+    "tests/test_machine.py",
+    "tests/test_scan.py",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["F401"]
