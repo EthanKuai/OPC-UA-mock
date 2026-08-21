@@ -142,6 +142,10 @@ async def issue(key: Path, cert: Path, uri: str, *, server: bool) -> None:
         cert,
         uri,
         socket.gethostname(),
-        [ExtendedKeyUsageOID.SERVER_AUTH if server else ExtendedKeyUsageOID.CLIENT_AUTH],
+        [
+            ExtendedKeyUsageOID.SERVER_AUTH
+            if server
+            else ExtendedKeyUsageOID.CLIENT_AUTH
+        ],
         SUBJECT,
     )

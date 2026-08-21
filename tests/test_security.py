@@ -20,7 +20,6 @@ from contract import CmdCode, Contract, load_contract
 from plant import serving
 from processes import free_port, spawn
 from security import (
-    CLIENT_URI,
     Certificates,
     ClientSecurity,
     ensure_certificates,

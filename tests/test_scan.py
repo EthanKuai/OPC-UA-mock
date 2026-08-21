@@ -50,11 +50,15 @@ def ack_addr(contract: Contract, field: str) -> int:
 
 
 def setpoint_addr(contract: Contract) -> int:
-    return next(s for s in contract.signals if s.name == "Conveyor1.SpeedSetpoint").modbus.addr
+    return next(
+        s for s in contract.signals if s.name == "Conveyor1.SpeedSetpoint"
+    ).modbus.addr
 
 
 def actual_addr(contract: Contract) -> int:
-    return next(s for s in contract.signals if s.name == "Conveyor1.ActualSpeed").modbus.addr
+    return next(
+        s for s in contract.signals if s.name == "Conveyor1.ActualSpeed"
+    ).modbus.addr
 
 
 # --- scan timing --------------------------------------------------------

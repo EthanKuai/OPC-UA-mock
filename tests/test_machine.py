@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from machine import Cnc, CncState, Conveyor, PartSensor
@@ -55,7 +53,11 @@ def test_speed_ramps_to_zero_when_stopped():
 def test_part_sensor_detects_presence_within_tolerance():
     sensor = PartSensor(position=1.0, tolerance=0.05)
     conveyor = Conveyor(
-        ramp_time=0.01, max_speed=1.0, speed_setpoint=0.0, position=1.02, sensors=[sensor]
+        ramp_time=0.01,
+        max_speed=1.0,
+        speed_setpoint=0.0,
+        position=1.02,
+        sensors=[sensor],
     )
     assert conveyor.parts_present() == [True]
 

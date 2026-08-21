@@ -191,7 +191,9 @@ async def test_jitter_inside_the_deadband_is_not_reported(plant):
     await stack.updates.wait_for_value(SETPOINT, 1.5)
 
 
-async def test_the_subscription_is_restored_after_the_gateway_goes_away(plant, contract):
+async def test_the_subscription_is_restored_after_the_gateway_goes_away(
+    plant, contract
+):
     """The gateway is stopped mid-run and started again. The client has to
     come back on its own, with its monitored items intact."""
     stack = await plant()

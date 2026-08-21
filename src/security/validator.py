@@ -47,7 +47,11 @@ class RejectingValidator:
             await self._validator.validate(cert, app_description)
         except ServiceError:
             path = self._keep(cert)
-            log.warning("refused %s; certificate kept at %s", app_description.ApplicationUri, path)
+            log.warning(
+                "refused %s; certificate kept at %s",
+                app_description.ApplicationUri,
+                path,
+            )
             raise
 
     def _keep(self, cert: x509.Certificate) -> Path:
