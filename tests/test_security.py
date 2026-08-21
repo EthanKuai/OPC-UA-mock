@@ -116,6 +116,25 @@ async def test_a_certificate_nobody_trusted_is_refused_and_kept(
     assert [path.read_bytes() for path in kept] == [intruder.certificate.read_bytes()]
 
 
+async def test_a_refusal_is_kept_even_when_the_rejected_folder_does_not_exist_yet(
+    contract, plc, certs, intruder, cert_root
+):
+    """A gateway started without ever running `just certs` in this exact spot
+    still has to refuse cleanly, not crash trying to file the evidence."""
+    missing = cert_root / "never-created"
+    assert not missing.exists()
+    security = replace(certs.server(), rejected=missing)
+
+    async with serving(contract, plc.port, security) as endpoint:
+        controller = DeviceController(contract, endpoint, security=intruder)
+        with pytest.raises((ua.UaError, OSError, asyncio.TimeoutError)):
+            await controller.connect()
+        await controller.disconnect()
+
+    kept = list(missing.iterdir())
+    assert [path.read_bytes() for path in kept] == [intruder.certificate.read_bytes()]
+
+
 async def test_a_trusted_certificate_with_the_wrong_password_is_refused(
     contract, plc, certs
 ):

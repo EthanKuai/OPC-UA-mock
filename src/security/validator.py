@@ -27,6 +27,11 @@ class RejectingValidator:
 
     def __init__(self, trusted: Path, rejected: Path) -> None:
         self.rejected = rejected
+        # _keep() writes here on every refusal. ensure_certificates() makes
+        # this folder too, but only serve() depending on that would mean the
+        # first refusal a gateway started some other way ever sees is a
+        # crash instead of a clean rejection.
+        self.rejected.mkdir(parents=True, exist_ok=True)
         self._trust_store = TrustStore([trusted], [])
         self._validator = CertificateValidator(
             CertificateValidatorOptions.TRUSTED_VALIDATION
