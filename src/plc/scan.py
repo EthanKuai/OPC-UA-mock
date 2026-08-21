@@ -50,7 +50,9 @@ class Plc:
             CncState(name): code
             for code, name in self._cnc_state_signal.opcua.states.items()
         }
-        self._cmd_idx = {name: i for i, name in enumerate(contract.command_block.layout)}
+        self._cmd_idx = {
+            name: i for i, name in enumerate(contract.command_block.layout)
+        }
         self._ack_idx = {name: i for i, name in enumerate(contract.ack_block.layout)}
         self._init_registers()
 
@@ -85,7 +87,9 @@ class Plc:
         outputs = OutputImage()
 
         raw = [image.holding[a] for a in self._setpoint_signal.modbus.span]
-        outputs.conveyor_speed_setpoint = decode(self._setpoint_signal.modbus, raw, meta)
+        outputs.conveyor_speed_setpoint = decode(
+            self._setpoint_signal.modbus, raw, meta
+        )
 
         ramp_raw = [image.holding[a] for a in self._ramp_signal.modbus.span]
         ramp = decode(self._ramp_signal.modbus, ramp_raw, meta)
@@ -93,7 +97,9 @@ class Plc:
 
         self._publish(outputs, self._actual_signal, image.conveyor_speed, meta)
         self._publish(outputs, self._position_signal, image.conveyor_position, meta)
-        self._publish(outputs, self._cnc_state_signal, self._cnc_codes[image.cnc_state], meta)
+        self._publish(
+            outputs, self._cnc_state_signal, self._cnc_codes[image.cnc_state], meta
+        )
 
         cb, ab = self.contract.command_block, self.contract.ack_block
         cmd_code = image.holding[cb.base + self._cmd_idx["cmd_code"]]
@@ -132,7 +138,9 @@ class Plc:
         return outputs
 
     @staticmethod
-    def _publish(outputs: OutputImage, signal: Signal, value: float, meta: Meta) -> None:
+    def _publish(
+        outputs: OutputImage, signal: Signal, value: float, meta: Meta
+    ) -> None:
         table = outputs.memory_updates.setdefault(signal.modbus.table, {})
         table.update(zip(signal.modbus.span, encode(signal.modbus, value, meta)))
 

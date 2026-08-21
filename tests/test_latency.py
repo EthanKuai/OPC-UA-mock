@@ -116,7 +116,9 @@ async def test_latency_stays_inside_the_configured_budget(contract, plc):
     for term, value in budget.items():
         print(f"  {term:<20}{value:>8}")
     print(f"  {'budget':<20}{total:>8}")
-    print(f"  {'sampling interval':<20}{SAMPLING_PERIOD_MS:>8}   (requested, not spent)")
+    print(
+        f"  {'sampling interval':<20}{SAMPLING_PERIOD_MS:>8}   (requested, not spent)"
+    )
     print(f"  {'measured p50':<20}{p50:>8.1f}")
     print(f"  {'measured p99':<20}{p99:>8.1f}   ({SAMPLES} samples)")
 

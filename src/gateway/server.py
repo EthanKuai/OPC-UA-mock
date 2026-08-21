@@ -385,7 +385,9 @@ class Gateway:
         if not reading.ok:
             self._last_words[name] = None
             self._last_state_code[name] = None
-            await self.server.write_attribute_value(node_id, self._bad_value(reading.at))
+            await self.server.write_attribute_value(
+                node_id, self._bad_value(reading.at)
+            )
             return
 
         self._last_words[name] = reading.words
@@ -394,7 +396,9 @@ class Gateway:
         if state is None:
             log.warning("%s: no declared state for register code %d", name, code)
             self._last_state_code[name] = None
-            await self.server.write_attribute_value(node_id, self._bad_value(reading.at))
+            await self.server.write_attribute_value(
+                node_id, self._bad_value(reading.at)
+            )
             return
 
         changed = code != self._last_state_code[name]

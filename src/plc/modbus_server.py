@@ -88,7 +88,9 @@ class _RejectedHandler(ServerRequestHandler):
 class PlcModbusServer(ModbusTcpServer):
     """Modbus TCP server living in the PLC process, serving the image tables."""
 
-    def __init__(self, memory: dict[str, dict[int, int]], address: tuple[str, int]) -> None:
+    def __init__(
+        self, memory: dict[str, dict[int, int]], address: tuple[str, int]
+    ) -> None:
         # ModbusTcpServer insists on a SimDevice to construct. The real store
         # is the PLC image table, swapped in immediately below; nothing ever
         # reads this placeholder.

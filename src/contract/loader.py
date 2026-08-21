@@ -89,9 +89,7 @@ def _check_signal_kind(signals: tuple[Signal, ...]) -> None:
     # thing to build it as.
     for s in signals:
         if (s.opcua.type is None) == (s.opcua.states is None):
-            raise ContractError(
-                f"{s.name}: opcua needs exactly one of type or states"
-            )
+            raise ContractError(f"{s.name}: opcua needs exactly one of type or states")
 
 
 def _check_no_overlaps(contract: Contract) -> None:
