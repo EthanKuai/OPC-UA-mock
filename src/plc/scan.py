@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from contract import AckResult, CmdCode, Contract, Meta, Signal, decode, encode
-from machine import Conveyor
+from machine import Cnc, CncState, Conveyor
 
 from .image import InputImage, OutputImage
 from .pulse import PulseLatch
@@ -29,9 +29,10 @@ class Plc:
     every scan_period_ms. Logic never runs off-tick, and outputs are never
     visible outside of write_outputs()."""
 
-    def __init__(self, contract: Contract, conveyor: Conveyor) -> None:
+    def __init__(self, contract: Contract, conveyor: Conveyor, cnc: Cnc) -> None:
         self.contract = contract
         self.conveyor = conveyor
+        self.cnc = cnc
         self.memory: dict[str, dict[int, int]] = {}
         self.part_pulse = PulseLatch()
         self.watchdog_tripped = False
@@ -42,6 +43,13 @@ class Plc:
         self._actual_signal = by_name["Conveyor1.ActualSpeed"]
         self._ramp_signal = by_name["Conveyor1.RampTime"]
         self._position_signal = by_name["Conveyor1.Position"]
+        self._cnc_state_signal = by_name["Cnc.State"]
+        # The register code for each state, read from the same contract the
+        # gateway uses to decode it back - one number, declared once.
+        self._cnc_codes = {
+            CncState(name): code
+            for code, name in self._cnc_state_signal.opcua.states.items()
+        }
         self._cmd_idx = {name: i for i, name in enumerate(contract.command_block.layout)}
         self._ack_idx = {name: i for i, name in enumerate(contract.ack_block.layout)}
         self._init_registers()
@@ -68,6 +76,7 @@ class Plc:
             conveyor_speed=self.conveyor.speed,
             conveyor_position=self.conveyor.position,
             conveyor_fault=self.conveyor.fault,
+            cnc_state=self.cnc.state,
             part_pulse=self.part_pulse.read_and_clear(),
         )
 
@@ -84,6 +93,7 @@ class Plc:
 
         self._publish(outputs, self._actual_signal, image.conveyor_speed, meta)
         self._publish(outputs, self._position_signal, image.conveyor_position, meta)
+        self._publish(outputs, self._cnc_state_signal, self._cnc_codes[image.cnc_state], meta)
 
         cb, ab = self.contract.command_block, self.contract.ack_block
         cmd_code = image.holding[cb.base + self._cmd_idx["cmd_code"]]
@@ -100,6 +110,18 @@ class Plc:
             elif cmd_code == CmdCode.STOP:
                 ack_result = AckResult.OK
                 outputs.conveyor_running = False
+            elif cmd_code == CmdCode.CNC_START:
+                if image.cnc_state is CncState.IDLE:
+                    ack_result = AckResult.OK
+                    outputs.cnc_start = True
+                else:
+                    ack_result = AckResult.STATE
+            elif cmd_code == CmdCode.CNC_RESET:
+                if image.cnc_state is CncState.FAULT:
+                    ack_result = AckResult.OK
+                    outputs.cnc_reset = True
+                else:
+                    ack_result = AckResult.STATE
             else:
                 ack_result = AckResult.RANGE
 
@@ -121,6 +143,10 @@ class Plc:
             self.conveyor.speed_setpoint = outputs.conveyor_speed_setpoint
         if outputs.conveyor_ramp_time is not None:
             self.conveyor.ramp_time = outputs.conveyor_ramp_time
+        if outputs.cnc_start:
+            self.cnc.start()
+        if outputs.cnc_reset:
+            self.cnc.reset()
         for table, updates in outputs.memory_updates.items():
             self.memory[table].update(updates)
 
@@ -129,6 +155,7 @@ class Plc:
         outputs = self.execute(image)
         self.write_outputs(outputs)
         self.conveyor.step(dt)
+        self.cnc.step(dt)
 
     async def run(self, *, ticks: int | None = None) -> None:
         dt = self.contract.meta.scan_period_ms / 1000

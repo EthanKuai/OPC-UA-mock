@@ -20,6 +20,12 @@ namespace index - the namespace URI is resolved to an index at connect time.
 to write a signal. Modbus has no opinion on the matter, which is what the
 rogue is for.
 
+`opcua:` has a second shape besides a plain Variable's `type`: `states`, a
+register-code-to-name map, builds the signal as a conforming
+`FiniteStateMachineType` (`CurrentState`, `LastTransition`) instead. `Cnc.State`
+is the one example; its cycle is driven the same way Conveyor1's is, through
+`CncStart`/`CncReset` methods and the same sequence-numbered command block.
+
 ## Running it
 
 ```fish

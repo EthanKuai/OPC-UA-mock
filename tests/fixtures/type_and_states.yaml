@@ -1,0 +1,21 @@
+meta:
+  namespace_uri: "http://mock.local/plant/"
+  word_order: high_first
+  byte_order: big
+  scan_period_ms: 10
+  poll_period_ms: 100
+
+signals:
+  # A signal cannot be both a plain Variable and a state machine.
+  - name: Cnc.State
+    iec: "%MW40"
+    modbus: {table: input, addr: 40, type: uint16}
+    opcua: {id: "s=Cnc.State", type: Int16, access: RO, states: {0: Idle, 1: Fault}}
+    owner: plc
+
+command_block:
+  base: 100
+  layout: [cmd_code, arg0_lo, arg0_hi, seq]
+ack_block:
+  base: 110
+  layout: [ack_seq, ack_result]

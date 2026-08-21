@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from asyncua import Server, ua
 from asyncua.common.callback import CallbackType
 from asyncua.common.methods import uamethod
+from asyncua.common.statemachine import State, StateMachine, Transition
 from asyncua.crypto.permission_rules import User, UserRole
 from pymodbus.exceptions import ModbusException
 
@@ -48,6 +49,12 @@ HISTORY_COUNT = 10_000
 # sent: the caller's picture of the plant is already wrong, and issuing on top
 # of it would only make the next picture wrong too.
 CONTENDED_STATUS = ua.StatusCodes.BadSequenceNumberUnknown
+
+# The two state_type values StateMachine.add_state accepts that this gateway
+# ever produces: the lowest-numbered declared state is the machine's initial
+# one, every other declared state is a plain one.
+INITIAL_STATE_TYPE = ua.NodeId(2309, 0)
+STATE_TYPE = ua.NodeId(2307, 0)
 
 
 class _Operators:
@@ -105,6 +112,15 @@ class Gateway:
         # write that passed through here came from a client; the poll loop's
         # own write_attribute_value() calls never do.
         self._external_writes: set[ua.NodeId] = set()
+
+        # Per state-machine signal: the StateMachine itself, its declared
+        # states and transitions by register code, and the code last
+        # published - so a transition is only recorded on a real change, not
+        # re-stamped with "now" every poll like CurrentState is.
+        self._machines: dict[str, StateMachine] = {}
+        self._states: dict[str, dict[int, State]] = {}
+        self._transitions: dict[str, dict[int, Transition]] = {}
+        self._last_state_code: dict[str, int | None] = {}
 
     # ---------------------------------------------------------------- startup
 
@@ -165,7 +181,10 @@ class Gateway:
                         ua.NodeId(device_name, self.idx), self._qname(device_name)
                     )
                 parent = devices[device_name]
-            await self._add_signal(parent, signal, leaf or signal.name)
+            if signal.opcua.states is not None:
+                await self._add_state_signal(parent, signal, leaf or signal.name)
+            else:
+                await self._add_signal(parent, signal, leaf or signal.name)
 
         # The command block is one PLC-wide resource in the contract, not a
         # per-device one, so the methods that drive it live at plant level.
@@ -212,6 +231,53 @@ class Gateway:
         self._by_node_id[node_id] = signal
         self._last_words[signal.name] = None
 
+    async def _add_state_signal(self, parent, signal: Signal, browse_name: str) -> None:
+        """A conforming FiniteStateMachineType instead of a plain Variable:
+        CurrentState and LastTransition, generated from opcua.states rather
+        than hand-built per signal - the same "add it to the contract, not
+        to this file" promise ordinary signals get."""
+        codes = sorted(signal.opcua.states)
+        initial = codes[0]
+
+        machine = StateMachine(self.server, parent, self.idx, browse_name)
+        await machine.install(optionals=True)
+        # _write_state()/_write_transition() write State.node.nodeid into the
+        # Id property as a NodeId, but the standard nodeset's own instance of
+        # that property is typed String - every real transition then raises
+        # BadTypeMismatch. Id is documentary; the register code in self._states
+        # is what this gateway actually keys off, so disable just that write.
+        machine._current_state_id_node = None
+        machine._last_transition_id_node = None
+
+        states: dict[int, State] = {}
+        transitions: dict[int, Transition] = {}
+        for code in codes:
+            name = signal.opcua.states[code]
+            state_type = INITIAL_STATE_TYPE if code == initial else STATE_TYPE
+            # +1: StateMachine.add_state() checks `if not state.number`, so a
+            # register code of 0 (this contract's own initial-state code) is
+            # read as "missing" and rejected. The OPC UA StateNumber is
+            # cosmetic - the register code is what's authoritative - so
+            # shifting it is free.
+            number = code + 1
+            states[code] = State(str(code), name, number)
+            await machine.add_state(states[code], state_type=state_type)
+            transitions[code] = Transition(str(code), f"To{name}", number)
+            await machine.add_transition(transitions[code])
+
+        self._machines[signal.name] = machine
+        self._states[signal.name] = states
+        self._transitions[signal.name] = transitions
+        self._last_state_code[signal.name] = None
+
+        # CurrentState is what a client subscribes to and what a poll
+        # failure has to mark Bad - both keyed the same way as a plain
+        # signal's own Value node. _current_state_node is private; install()
+        # gives no public way to get it back.
+        self._node_ids[signal.name] = machine._current_state_node.nodeid
+        self._by_node_id[self._node_ids[signal.name]] = signal
+        self._last_words[signal.name] = None
+
     def _qname(self, name: str) -> ua.QualifiedName:
         # Browse names belong in the contract's namespace, not in ns=0 where
         # they would collide with the standard address space.
@@ -232,21 +298,28 @@ class Gateway:
         async def Stop(parent) -> ua.StatusCode:
             return await self._invoke(CmdCode.STOP)
 
-        await plant.add_method(
-            ua.NodeId("Plant.Start", self.idx),
-            self._qname("Start"),
-            Start,
-            [],
-            # No output arguments: the result IS the call's StatusCode.
-            [],
-        )
-        await plant.add_method(
-            ua.NodeId("Plant.Stop", self.idx),
-            self._qname("Stop"),
-            Stop,
-            [],
-            [],
-        )
+        @uamethod
+        async def CncStart(parent) -> ua.StatusCode:
+            return await self._invoke(CmdCode.CNC_START)
+
+        @uamethod
+        async def CncReset(parent) -> ua.StatusCode:
+            return await self._invoke(CmdCode.CNC_RESET)
+
+        for name, fn in (
+            ("Start", Start),
+            ("Stop", Stop),
+            ("CncStart", CncStart),
+            ("CncReset", CncReset),
+        ):
+            await plant.add_method(
+                ua.NodeId(f"Plant.{name}", self.idx),
+                self._qname(name),
+                fn,
+                [],
+                # No output arguments: the result IS the call's StatusCode.
+                [],
+            )
 
     # --------------------------------------------------------------- commands
 
@@ -277,6 +350,10 @@ class Gateway:
     # ------------------------------------------------------------------ polls
 
     async def publish(self, reading: Reading) -> None:
+        if reading.signal.opcua.states is not None:
+            await self._publish_state(reading)
+            return
+
         node_id = self._node_ids[reading.signal.name]
         vtype = ua.VariantType[reading.signal.opcua.type]
 
@@ -293,13 +370,45 @@ class Gateway:
             )
         else:
             self._last_words[reading.signal.name] = None
-            value = ua.DataValue(
-                StatusCode=ua.StatusCode(STALE_STATUS),
-                SourceTimestamp=reading.at,
-                ServerTimestamp=datetime.now(UTC),
-            )
+            value = self._bad_value(reading.at)
 
         await self.server.write_attribute_value(node_id, value)
+
+    async def _publish_state(self, reading: Reading) -> None:
+        """CurrentState follows the same poll straight through like any other
+        signal, but a *transition* is only recorded - LastTransition stamped
+        with now - on a code that actually differs from the last one
+        published, or every poll would look like a fresh transition."""
+        name = reading.signal.name
+        node_id = self._node_ids[name]
+
+        if not reading.ok:
+            self._last_words[name] = None
+            self._last_state_code[name] = None
+            await self.server.write_attribute_value(node_id, self._bad_value(reading.at))
+            return
+
+        self._last_words[name] = reading.words
+        code = int(reading.value)
+        state = self._states[name].get(code)
+        if state is None:
+            log.warning("%s: no declared state for register code %d", name, code)
+            self._last_state_code[name] = None
+            await self.server.write_attribute_value(node_id, self._bad_value(reading.at))
+            return
+
+        changed = code != self._last_state_code[name]
+        self._last_state_code[name] = code
+        transition = self._transitions[name][code] if changed else None
+        await self._machines[name].change_state(state, transition)
+
+    @staticmethod
+    def _bad_value(at: datetime) -> ua.DataValue:
+        return ua.DataValue(
+            StatusCode=ua.StatusCode(STALE_STATUS),
+            SourceTimestamp=at,
+            ServerTimestamp=datetime.now(UTC),
+        )
 
     # ------------------------------------------------------------ client writes
 

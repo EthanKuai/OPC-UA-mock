@@ -7,10 +7,18 @@ from pathlib import Path
 import pytest
 
 from contract import AckResult, CmdCode, Contract, load_contract
-from machine import Conveyor
+from machine import Cnc, CncState, Conveyor
 from plc import Plc, PulseLatch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Values these tests never wait out; only the constructor needs them.
+CNC_DURATIONS = {
+    CncState.HOMING: 1.0,
+    CncState.LOADING: 1.0,
+    CncState.RUNNING: 1.0,
+    CncState.UNLOADING: 1.0,
+}
 
 
 @pytest.fixture
@@ -29,7 +37,8 @@ def timing_contract(contract: Contract) -> Contract:
 
 def make_plc(contract: Contract) -> Plc:
     conveyor = Conveyor(ramp_time=0.2, max_speed=2.0)
-    return Plc(contract, conveyor)
+    cnc = Cnc(durations=CNC_DURATIONS)
+    return Plc(contract, conveyor, cnc)
 
 
 def cmd_addr(contract: Contract, field: str) -> int:

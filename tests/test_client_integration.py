@@ -30,6 +30,8 @@ UNSHIFTED_INDEX = 2
 
 SETPOINT = "Conveyor1.SpeedSetpoint"
 POSITION = "Conveyor1.Position"
+CNC_STATE = "Cnc.State"
+CNC_CYCLE = ["Homing", "Loading", "Running", "Unloading", "Idle"]
 
 # Several gateway poll periods (100 ms each): long enough that a client
 # notifying per poll rather than per change would be caught.
@@ -253,3 +255,21 @@ async def test_a_dead_plc_reaches_the_client_as_a_bad_status(plant, plc, contrac
         update = await stack.updates.wait_for(signal.name, timeout=10.0)
         assert not update.ok
         assert update.value is None
+
+
+async def test_a_cnc_cycle_driven_from_the_client_transitions_current_state(plant):
+    """The CNC is a real FiniteStateMachineType now, not an integer: a client
+    command has to move CurrentState through the whole cycle and back, and
+    the client has to see it happen on its own subscription - no read API."""
+    stack = await plant()
+
+    await stack.controller.command(CmdCode.CNC_START)
+
+    deadline = asyncio.get_running_loop().time() + 15.0
+    seen: list[str] = []
+    while asyncio.get_running_loop().time() < deadline:
+        seen = [u.value for u in stack.updates.of(CNC_STATE)]
+        if seen[-len(CNC_CYCLE) :] == CNC_CYCLE:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"cycle never completed within 15s; saw {seen}")

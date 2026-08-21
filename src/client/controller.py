@@ -66,7 +66,9 @@ class Update:
     """
 
     signal: Signal
-    value: float | bool | None
+    # str for a state-machine signal's CurrentState, unwrapped from the
+    # LocalizedText it arrives as.
+    value: float | bool | str | None
     status: ua.StatusCode
     source_timestamp: datetime | None
 
@@ -80,7 +82,7 @@ Sink = Callable[[Update], Awaitable[None]]
 
 def method_name(code: CmdCode) -> str:
     """Command codes are contractual; the method names follow from them."""
-    return code.name.capitalize()
+    return "".join(word.capitalize() for word in code.name.split("_"))
 
 
 class _ChangeHandler:
@@ -95,6 +97,10 @@ class _ChangeHandler:
         signal = self.controller.signal_of(node)
         if signal is None:
             return
+        if isinstance(val, ua.LocalizedText):
+            # A state machine's CurrentState - the only signal that isn't
+            # already the plain Python value the contract's type promises.
+            val = val.Text
         dv = data.monitored_item.Value
         update = Update(signal, val, dv.StatusCode, dv.SourceTimestamp)
         if self.controller.report(update):
@@ -181,7 +187,14 @@ class DeviceController:
         """Find every contract node by browse path, from Objects down."""
         self._plant = await self.client.nodes.objects.get_child(self._path(PLANT))
         for signal in self.contract.signals:
-            node = await self._plant.get_child(self._path(*signal.name.split(".")))
+            path = self._path(*signal.name.split("."))
+            if signal.opcua.states is not None:
+                # A state machine's leaf names the machine object, not the
+                # Variable a plain signal's path already ends on. CurrentState
+                # is the standard StateMachineType's own property, in ns=0
+                # like the rest of the standard address space - not ours.
+                path = [*path, ua.QualifiedName("CurrentState", 0)]
+            node = await self._plant.get_child(path)
             self._nodes[signal.name] = node
             self._signals[node.nodeid] = signal
         for code in CmdCode:

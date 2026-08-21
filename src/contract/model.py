@@ -40,13 +40,20 @@ class ModbusMapping:
 @dataclass(frozen=True)
 class OpcUaMapping:
     id: str
-    type: str
     access: str
+    # One of ua.VariantType's names, for a plain Variable. None instead for a
+    # signal exposed as a state machine - see `states` below.
+    type: str | None = None
     unit: str | None = None
     # Whether the server keeps a history of this signal. A property of the
     # northbound interface, like access and unit, so it belongs in the
     # contract rather than in whoever happens to build the address space.
     historize: bool = False
+    # Raw register value -> state name, for a signal exposed as a conforming
+    # FiniteStateMachineType (CurrentState/LastTransition) instead of a plain
+    # Variable. The lowest number is the machine's initial state. Mutually
+    # exclusive with `type`.
+    states: dict[int, str] | None = None
 
 
 @dataclass(frozen=True)

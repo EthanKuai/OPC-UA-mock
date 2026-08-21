@@ -26,6 +26,17 @@ signals:
     modbus: {table: input, addr: 30, type: float32}
     opcua: {id: "s=Conveyor1.Position", type: Float, unit: "m", access: RO, historize: true}
     owner: plc
+  - name: Cnc.State
+    iec: "%MW40"
+    modbus: {table: input, addr: 40, type: uint16}
+    # A FiniteStateMachineType, not a plain Variable - see OpcUaMapping.states.
+    # 0 doubles as the register's own power-on default and the machine's
+    # real initial state, so a cold PLC needs no special-casing here either.
+    opcua:
+      id: "s=Cnc.State"
+      access: RO
+      states: {0: Idle, 1: Homing, 2: Loading, 3: Running, 4: Unloading, 5: Fault}
+    owner: plc
 
 command_block:                  # written atomically with FC16
   base: 100

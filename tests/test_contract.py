@@ -21,6 +21,7 @@ def test_loads_real_contract():
         "Conveyor1.RampTime",
         "Conveyor1.ActualSpeed",
         "Conveyor1.Position",
+        "Cnc.State",
     }
 
     position = next(s for s in contract.signals if s.name == "Conveyor1.Position")
@@ -49,6 +50,24 @@ def test_historize_is_declared_per_signal_and_off_by_default():
     # What somebody asked for is not; the client already knows what it wrote.
     assert not by_name["Conveyor1.SpeedSetpoint"].opcua.historize
     assert not by_name["Conveyor1.RampTime"].opcua.historize
+
+
+def test_a_signal_is_a_variable_or_a_state_machine_never_both():
+    contract = load_contract(REPO_ROOT / "config" / "tags.yaml")
+    cnc_state = next(s for s in contract.signals if s.name == "Cnc.State")
+
+    assert cnc_state.opcua.type is None
+    assert cnc_state.opcua.states == {
+        0: "Idle",
+        1: "Homing",
+        2: "Loading",
+        3: "Running",
+        4: "Unloading",
+        5: "Fault",
+    }
+
+    with pytest.raises(ContractError, match="exactly one of type or states"):
+        load_contract(FIXTURES / "type_and_states.yaml")
 
 
 def test_duplicate_signal_name_raises():

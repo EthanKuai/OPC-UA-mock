@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from machine import CncState
+
 
 @dataclass
 class InputImage:
@@ -13,6 +15,7 @@ class InputImage:
     conveyor_speed: float
     conveyor_position: float
     conveyor_fault: bool
+    cnc_state: CncState
     part_pulse: bool
 
 
@@ -25,3 +28,8 @@ class OutputImage:
     conveyor_running: bool | None = None
     conveyor_speed_setpoint: float | None = None
     conveyor_ramp_time: float | None = None
+    # One-shot triggers, not levels: Cnc.start()/reset() are themselves
+    # idempotent outside the state they apply in, so "act this scan" is all
+    # write_outputs() needs to know.
+    cnc_start: bool = False
+    cnc_reset: bool = False

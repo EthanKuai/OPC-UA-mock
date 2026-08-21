@@ -7,6 +7,8 @@ class CmdCode(IntEnum):
     NONE = 0
     START = 1
     STOP = 2
+    CNC_START = 3
+    CNC_RESET = 4
 
 
 class AckResult(IntEnum):

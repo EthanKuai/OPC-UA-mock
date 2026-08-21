@@ -58,6 +58,7 @@ def _validate(contract: Contract) -> None:
     _check_orders(contract.meta)
     _check_duplicate_names(contract.signals)
     _check_no_overlaps(contract)
+    _check_signal_kind(contract.signals)
 
 
 def _check_orders(meta: Meta) -> None:
@@ -80,6 +81,17 @@ def _check_duplicate_names(signals: tuple[Signal, ...]) -> None:
     dupes = sorted(name for name, count in counts.items() if count > 1)
     if dupes:
         raise ContractError(f"duplicate signal name(s): {', '.join(dupes)}")
+
+
+def _check_signal_kind(signals: tuple[Signal, ...]) -> None:
+    # A signal is a plain Variable (opcua.type) or a state machine
+    # (opcua.states), never both and never neither - the gateway has no third
+    # thing to build it as.
+    for s in signals:
+        if (s.opcua.type is None) == (s.opcua.states is None):
+            raise ContractError(
+                f"{s.name}: opcua needs exactly one of type or states"
+            )
 
 
 def _check_no_overlaps(contract: Contract) -> None:
